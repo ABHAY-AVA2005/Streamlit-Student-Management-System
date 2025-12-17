@@ -1,218 +1,159 @@
-# =========================================================
-# STUDENT MANAGEMENT SYSTEM (ERROR-PROOF)
-# Streamlit + SQLite + Pandas
-# =========================================================
-
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime
 
-# =========================================================
-# STREAMLIT PAGE CONFIG
-# =========================================================
-
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="Student Management System",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Employee Management System",
+    page_icon="💼",
+    layout="wide"
 )
 
-st.title("🎓 Student Management System")
-
-# =========================================================
-# DATABASE CONNECTION (SAFE)
-# =========================================================
-
-@st.cache_resource
-def get_connection():
-    return sqlite3.connect("students.db", check_same_thread=False)
-
-conn = get_connection()
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect("employees.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# =========================================================
-# CREATE TABLE (SAFE)
-# =========================================================
-
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE IF NOT EXISTS employees (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
+    name TEXT,
+    email TEXT,
     phone TEXT,
     department TEXT,
-    year INTEGER,
-    status TEXT DEFAULT 'ACTIVE',
-    created_at TEXT,
-    updated_at TEXT
+    experience INTEGER,
+    salary INTEGER
 )
 """)
 conn.commit()
 
-# =========================================================
-# HELPER FUNCTIONS
-# =========================================================
-
-def now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def get_active_students():
-    cursor.execute("SELECT * FROM students WHERE status='ACTIVE'")
-    return cursor.fetchall()
-
-def dataframe_from_rows(rows):
-    return pd.DataFrame(rows, columns=[
-        "ID", "Name", "Email", "Phone",
-        "Department", "Year", "Status",
-        "Created At", "Updated At"
-    ])
-
-# =========================================================
-# SIDEBAR MENU
-# =========================================================
+# ---------------- TITLE ----------------
+st.title("💼 Employee Management System")
 
 menu = [
-    "Add Student",
-    "View Students",
-    "Search & Filter",
-    "Update Student",
-    "Deactivate Student"
+    "📊 Dashboard",
+    "➕ Add Employee",
+    "📋 View Employees",
+    "✏️ Update Employee",
+    "🗑️ Delete Employee"
 ]
+choice = st.sidebar.selectbox("📌 Navigation", menu)
 
-choice = st.sidebar.selectbox("Menu", menu)
+# ---------------- DASHBOARD ----------------
+if choice == "📊 Dashboard":
+    st.header("📊 Employee Dashboard")
 
-# =========================================================
-# ADD STUDENT
-# =========================================================
+    df = pd.read_sql("SELECT * FROM employees", conn)
 
-if choice == "Add Student":
-    st.subheader("➕ Add Student")
+    if not df.empty:
+        col1, col2, col3, col4 = st.columns(4)
 
-    name = st.text_input("Name")
-    email = st.text_input("Email")
-    phone = st.text_input("Phone")
-    department = st.selectbox("Department", ["CSE", "AIML", "DS", "ECE"])
-    year = st.selectbox("Year", [1, 2, 3, 4])
+        col1.metric("👥 Total Employees", len(df))
+        col2.metric("💰 Average Salary", f"₹ {int(df['salary'].mean())}")
+        col3.metric("🏢 Departments", df['department'].nunique())
+        col4.metric("🕒 Avg Experience (Years)", round(df['experience'].mean(), 1))
 
-    if st.button("Save Student"):
-        if not name.strip() or not email.strip():
-            st.warning("Name and Email are required")
-        else:
-            try:
-                cursor.execute("""
-                INSERT INTO students
-                (name, email, phone, department, year, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (name, email, phone, department, year, now(), now()))
-                conn.commit()
-                st.success("Student added successfully")
-            except sqlite3.IntegrityError:
-                st.error("Email already exists")
+        st.subheader("Employees by Department")
+        dept_count = df['department'].value_counts()
+        st.bar_chart(dept_count)
 
-# =========================================================
-# VIEW STUDENTS
-# =========================================================
-
-elif choice == "View Students":
-    st.subheader("📋 Active Students")
-
-    rows = get_active_students()
-
-    if rows:
-        st.dataframe(dataframe_from_rows(rows), use_container_width=True)
+        st.subheader("Salary Distribution")
+        st.bar_chart(df['salary'])
     else:
-        st.info("No students found")
+        st.info("No employee data available")
 
-# =========================================================
-# SEARCH & FILTER (100% SAFE)
-# =========================================================
+# ---------------- ADD EMPLOYEE ----------------
+elif choice == "➕ Add Employee":
+    st.header("Add New Employee")
 
-elif choice == "Search & Filter":
-    st.subheader("🔍 Search Students")
+    col1, col2, col3 = st.columns(3)
 
-    keyword = st.text_input("Search by Name")
-    dept = st.selectbox("Department", ["All", "CSE", "AIML", "DS", "ECE"])
+    with col1:
+        name = st.text_input("Name")
+        email = st.text_input("Email")
 
-    query = "SELECT * FROM students WHERE status='ACTIVE'"
-    params = []
-
-    if keyword.strip():
-        query += " AND name LIKE ?"
-        params.append(f"%{keyword}%")
-
-    if dept != "All":
-        query += " AND department=?"
-        params.append(dept)
-
-    cursor.execute(query, tuple(params))
-    rows = cursor.fetchall()
-
-    if rows:
-        st.dataframe(dataframe_from_rows(rows), use_container_width=True)
-    else:
-        st.warning("No matching records")
-
-# =========================================================
-# UPDATE STUDENT
-# =========================================================
-
-elif choice == "Update Student":
-    st.subheader("✏️ Update Student")
-
-    rows = get_active_students()
-
-    if not rows:
-        st.info("No students available")
-    else:
-        ids = [r[0] for r in rows]
-        student_id = st.selectbox("Select Student ID", ids)
-
-        cursor.execute("SELECT * FROM students WHERE id=?", (student_id,))
-        s = cursor.fetchone()
-
-        name = st.text_input("Name", s[1])
-        email = st.text_input("Email", s[2])
-        phone = st.text_input("Phone", s[3])
+    with col2:
+        phone = st.text_input("Phone")
         department = st.selectbox(
-            "Department",
-            ["CSE", "AIML", "DS", "ECE"],
-            index=["CSE", "AIML", "DS", "ECE"].index(s[4])
+            "Department", ["HR", "IT", "Finance", "Sales", "Operations"]
         )
-        year = st.selectbox("Year", [1, 2, 3, 4], index=s[5] - 1)
 
-        if st.button("Update"):
+    with col3:
+        experience = st.number_input("Experience (Years)", min_value=0, max_value=40)
+        salary = st.number_input("Salary (₹)", min_value=0)
+
+    if st.button("Save Employee"):
+        if name and email and phone:
             cursor.execute("""
-            UPDATE students SET
-            name=?, email=?, phone=?, department=?, year=?, updated_at=?
-            WHERE id=?
-            """, (name, email, phone, department, year, now(), student_id))
+                INSERT INTO employees
+                (name, email, phone, department, experience, salary)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, email, phone, department, experience, salary))
             conn.commit()
-            st.success("Student updated successfully")
 
-# =========================================================
-# DEACTIVATE STUDENT (SOFT DELETE)
-# =========================================================
+            st.success("✅ Employee added successfully")
+        else:
+            st.error("❌ Please fill all required fields")
 
-elif choice == "Deactivate Student":
-    st.subheader("🚫 Deactivate Student")
+# ---------------- VIEW EMPLOYEES ----------------
+elif choice == "📋 View Employees":
+    st.header("Employee Records")
 
-    rows = get_active_students()
+    df = pd.read_sql("SELECT * FROM employees", conn)
+    st.dataframe(df, use_container_width=True)
 
-    if not rows:
-        st.info("No students available")
+# ---------------- UPDATE EMPLOYEE ----------------
+elif choice == "✏️ Update Employee":
+    st.header("Update Employee Details")
+
+    employee_ids = pd.read_sql("SELECT id FROM employees", conn)["id"].tolist()
+
+    if employee_ids:
+        selected_id = st.selectbox("Select Employee ID", employee_ids)
+        emp = cursor.execute(
+            "SELECT * FROM employees WHERE id=?", (selected_id,)
+        ).fetchone()
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            name = st.text_input("Name", emp[1])
+            email = st.text_input("Email", emp[2])
+
+        with col2:
+            phone = st.text_input("Phone", emp[3])
+            department = st.selectbox(
+                "Department",
+                ["HR", "IT", "Finance", "Sales", "Operations"],
+                index=["HR", "IT", "Finance", "Sales", "Operations"].index(emp[4])
+            )
+
+        with col3:
+            experience = st.number_input("Experience (Years)", value=emp[5])
+            salary = st.number_input("Salary (₹)", value=emp[6])
+
+        if st.button("Update Employee"):
+            cursor.execute("""
+                UPDATE employees
+                SET name=?, email=?, phone=?, department=?, experience=?, salary=?
+                WHERE id=?
+            """, (name, email, phone, department, experience, salary, selected_id))
+            conn.commit()
+            st.success("🎉 Employee updated successfully")
     else:
-        ids = [r[0] for r in rows]
-        student_id = st.selectbox("Select Student ID", ids)
+        st.info("No employees found")
 
-        if st.button("Deactivate"):
-            cursor.execute("""
-            UPDATE students SET status='INACTIVE', updated_at=?
-            WHERE id=?
-            """, (now(), student_id))
+# ---------------- DELETE EMPLOYEE ----------------
+elif choice == "🗑️ Delete Employee":
+    st.header("Delete Employee")
+
+    employee_ids = pd.read_sql("SELECT id FROM employees", conn)["id"].tolist()
+
+    if employee_ids:
+        selected_id = st.selectbox("Select Employee ID", employee_ids)
+
+        if st.button("Delete Employee"):
+            cursor.execute("DELETE FROM employees WHERE id=?", (selected_id,))
             conn.commit()
-            st.warning("Student deactivated")
-
-# =========================================================
-# END
-# =========================================================
+            st.warning("⚠️ Employee deleted successfully")
+    else:
+        st.info("No employees available")
