@@ -1,26 +1,26 @@
 # =========================================================
-# REAL-LIFE STUDENT MANAGEMENT SYSTEM
+# REAL-LIFE STUDENT MANAGEMENT SYSTEM (CLOUD-READY)
 # Streamlit + SQLite
 # =========================================================
 
 import streamlit as st
 import sqlite3
 import pandas as pd
-import hashlib
 from datetime import datetime
 
 # =========================================================
 # DATABASE CONNECTION
 # =========================================================
 
+# Streamlit Cloud uses ephemeral filesystem. Ensure tables exist every run.
 conn = sqlite3.connect("students.db", check_same_thread=False)
 cursor = conn.cursor()
 
 # =========================================================
-# DATABASE TABLES
+# CREATE TABLES IF NOT EXIST
 # =========================================================
 
-# Students table (core entity)
+# Students table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS students (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS students (
 )
 """)
 
-# Attendance table (real-life feature)
+# Attendance table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS attendance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,19 +64,38 @@ conn.commit()
 # =========================================================
 
 def current_time():
-    """Returns current timestamp"""
+    """Return current timestamp"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def fetch_students():
-    """Fetch only active students"""
-    cursor.execute("SELECT * FROM students WHERE status='ACTIVE'")
-    return cursor.fetchall()
+    """Fetch all active students"""
+    try:
+        cursor.execute("SELECT * FROM students WHERE status='ACTIVE'")
+        return cursor.fetchall()
+    except sqlite3.OperationalError:
+        # If table doesn't exist, create it
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS students (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                phone TEXT,
+                department TEXT,
+                year INTEGER,
+                status TEXT DEFAULT 'ACTIVE',
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        conn.commit()
+        return []
 
 # =========================================================
-# UI CONFIG
+# UI CONFIGURATION
 # =========================================================
 
-st.title("🎓 Student Management System")
+st.set_page_config(page_title="Student Management System", page_icon="🎓", layout="wide")
+st.title("🎓 Real-Life Student Management System")
 
 menu = [
     "Add Student",
@@ -104,16 +123,19 @@ if choice == "Add Student":
     year = st.selectbox("Year", [1, 2, 3, 4])
 
     if st.button("Save Student"):
-        try:
-            cursor.execute("""
-                INSERT INTO students
-                (name, email, phone, department, year, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, email, phone, department, year, current_time(), current_time()))
-            conn.commit()
-            st.success("Student added successfully")
-        except:
-            st.error("Email already exists")
+        if name and email:
+            try:
+                cursor.execute("""
+                    INSERT INTO students
+                    (name, email, phone, department, year, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (name, email, phone, department, year, current_time(), current_time()))
+                conn.commit()
+                st.success("Student added successfully")
+            except sqlite3.IntegrityError:
+                st.error("Email already exists")
+        else:
+            st.error("Name and Email are mandatory")
 
 # =========================================================
 # VIEW STUDENTS
@@ -167,18 +189,20 @@ elif choice == "Attendance":
     st.subheader("Mark Attendance")
 
     students = fetch_students()
-    ids = [s[0] for s in students]
+    if not students:
+        st.warning("No active students found.")
+    else:
+        ids = [s[0] for s in students]
+        student_id = st.selectbox("Student ID", ids)
+        status = st.selectbox("Attendance", ["PRESENT", "ABSENT"])
 
-    student_id = st.selectbox("Student ID", ids)
-    status = st.selectbox("Attendance", ["PRESENT", "ABSENT"])
-
-    if st.button("Submit Attendance"):
-        cursor.execute("""
-            INSERT INTO attendance (student_id, date, status)
-            VALUES (?, ?, ?)
-        """, (student_id, current_time(), status))
-        conn.commit()
-        st.success("Attendance recorded")
+        if st.button("Submit Attendance"):
+            cursor.execute("""
+                INSERT INTO attendance (student_id, date, status)
+                VALUES (?, ?, ?)
+            """, (student_id, current_time(), status))
+            conn.commit()
+            st.success("Attendance recorded successfully")
 
 # =========================================================
 # MARKS MODULE
@@ -188,40 +212,47 @@ elif choice == "Marks":
     st.subheader("Add Student Marks")
 
     students = fetch_students()
-    ids = [s[0] for s in students]
+    if not students:
+        st.warning("No active students found.")
+    else:
+        ids = [s[0] for s in students]
+        student_id = st.selectbox("Student ID", ids)
+        subject = st.text_input("Subject")
+        marks = st.number_input("Marks", 0, 100)
 
-    student_id = st.selectbox("Student ID", ids)
-    subject = st.text_input("Subject")
-    marks = st.number_input("Marks", 0, 100)
-
-    if st.button("Save Marks"):
-        cursor.execute("""
-            INSERT INTO marks (student_id, subject, marks)
-            VALUES (?, ?, ?)
-        """, (student_id, subject, marks))
-        conn.commit()
-        st.success("Marks added")
+        if st.button("Save Marks"):
+            if subject:
+                cursor.execute("""
+                    INSERT INTO marks (student_id, subject, marks)
+                    VALUES (?, ?, ?)
+                """, (student_id, subject, marks))
+                conn.commit()
+                st.success("Marks added successfully")
+            else:
+                st.error("Subject is required")
 
 # =========================================================
-# SOFT DELETE (DEACTIVATE)
+# DEACTIVATE STUDENT (SOFT DELETE)
 # =========================================================
 
 elif choice == "Deactivate Student":
     st.subheader("Deactivate Student")
 
     students = fetch_students()
-    ids = [s[0] for s in students]
+    if not students:
+        st.warning("No active students found.")
+    else:
+        ids = [s[0] for s in students]
+        student_id = st.selectbox("Student ID", ids)
 
-    student_id = st.selectbox("Student ID", ids)
-
-    if st.button("Deactivate"):
-        cursor.execute("""
-            UPDATE students
-            SET status='INACTIVE', updated_at=?
-            WHERE id=?
-        """, (current_time(), student_id))
-        conn.commit()
-        st.warning("Student deactivated (not deleted)")
+        if st.button("Deactivate"):
+            cursor.execute("""
+                UPDATE students
+                SET status='INACTIVE', updated_at=?
+                WHERE id=?
+            """, (current_time(), student_id))
+            conn.commit()
+            st.warning("Student deactivated successfully")
 
 # =========================================================
 # EXPORT DATA
@@ -241,3 +272,7 @@ elif choice == "Export Data":
         df.to_csv(index=False),
         file_name="students.csv"
     )
+
+# =========================================================
+# END OF APP
+# =========================================================
