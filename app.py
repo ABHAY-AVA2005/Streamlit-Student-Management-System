@@ -1,23 +1,39 @@
-# ---------------------------------------------------------
-# REAL-LIFE STUDENT MANAGEMENT SYSTEM (SMS)
-# USING STREAMLIT + SQLITE
-# ---------------------------------------------------------
+# =========================================================
+# STUDENT MANAGEMENT SYSTEM (ERROR-PROOF)
+# Streamlit + SQLite + Pandas
+# =========================================================
 
 import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# ---------------------------------------------------------
-# DATABASE CONNECTION
-# ---------------------------------------------------------
+# =========================================================
+# STREAMLIT PAGE CONFIG
+# =========================================================
 
-conn = sqlite3.connect("students.db", check_same_thread=False)
+st.set_page_config(
+    page_title="Student Management System",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title("🎓 Student Management System")
+
+# =========================================================
+# DATABASE CONNECTION (SAFE)
+# =========================================================
+
+@st.cache_resource
+def get_connection():
+    return sqlite3.connect("students.db", check_same_thread=False)
+
+conn = get_connection()
 cursor = conn.cursor()
 
-# ---------------------------------------------------------
-# DATABASE SCHEMA
-# ---------------------------------------------------------
+# =========================================================
+# CREATE TABLE (SAFE)
+# =========================================================
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS students (
@@ -32,39 +48,29 @@ CREATE TABLE IF NOT EXISTS students (
     updated_at TEXT
 )
 """)
-
 conn.commit()
 
-# ---------------------------------------------------------
-# UTILITY FUNCTIONS
-# ---------------------------------------------------------
+# =========================================================
+# HELPER FUNCTIONS
+# =========================================================
 
-def fetch_students(filters=None):
-    base_query = "SELECT * FROM students WHERE status='ACTIVE'"
-    params = []
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if filters:
-        for key, value in filters.items():
-            base_query += f" AND {key}=?"
-            params.append(value)
-
-    cursor.execute(base_query, tuple(params))
+def get_active_students():
+    cursor.execute("SELECT * FROM students WHERE status='ACTIVE'")
     return cursor.fetchall()
 
-def fetch_all_students():
-    cursor.execute("SELECT * FROM students")
-    return cursor.fetchall()
+def dataframe_from_rows(rows):
+    return pd.DataFrame(rows, columns=[
+        "ID", "Name", "Email", "Phone",
+        "Department", "Year", "Status",
+        "Created At", "Updated At"
+    ])
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
-
-st.set_page_config(
-    page_title="Student Management System",
-    layout="wide"
-)
-
-st.title("🎓 Student Management System")
+# =========================================================
+# SIDEBAR MENU
+# =========================================================
 
 menu = [
     "Add Student",
@@ -76,156 +82,137 @@ menu = [
 
 choice = st.sidebar.selectbox("Menu", menu)
 
-# ---------------------------------------------------------
+# =========================================================
 # ADD STUDENT
-# ---------------------------------------------------------
+# =========================================================
 
 if choice == "Add Student":
-    st.subheader("Add New Student")
+    st.subheader("➕ Add Student")
 
-    name = st.text_input("Full Name")
+    name = st.text_input("Name")
     email = st.text_input("Email")
-    phone = st.text_input("Phone Number")
+    phone = st.text_input("Phone")
     department = st.selectbox("Department", ["CSE", "AIML", "DS", "ECE"])
-    year = st.selectbox("Academic Year", [1, 2, 3, 4])
+    year = st.selectbox("Year", [1, 2, 3, 4])
 
     if st.button("Save Student"):
-        if not name or not email:
-            st.error("Name and Email are mandatory")
+        if not name.strip() or not email.strip():
+            st.warning("Name and Email are required")
         else:
             try:
                 cursor.execute("""
-                INSERT INTO students 
+                INSERT INTO students
                 (name, email, phone, department, year, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    name, email, phone, department, year,
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                ))
+                """, (name, email, phone, department, year, now(), now()))
                 conn.commit()
                 st.success("Student added successfully")
             except sqlite3.IntegrityError:
                 st.error("Email already exists")
 
-# ---------------------------------------------------------
+# =========================================================
 # VIEW STUDENTS
-# ---------------------------------------------------------
+# =========================================================
 
 elif choice == "View Students":
-    st.subheader("All Active Students")
+    st.subheader("📋 Active Students")
 
-    students = fetch_students()
+    rows = get_active_students()
 
-    df = pd.DataFrame(
-        students,
-        columns=["ID", "Name", "Email", "Phone",
-                 "Department", "Year", "Status",
-                 "Created At", "Updated At"]
-    )
+    if rows:
+        st.dataframe(dataframe_from_rows(rows), use_container_width=True)
+    else:
+        st.info("No students found")
 
-    st.dataframe(df, use_container_width=True)
-
-# ---------------------------------------------------------
-# SEARCH & FILTER
-# ---------------------------------------------------------
+# =========================================================
+# SEARCH & FILTER (100% SAFE)
+# =========================================================
 
 elif choice == "Search & Filter":
-    st.subheader("Search & Filter Students")
+    st.subheader("🔍 Search Students")
 
     keyword = st.text_input("Search by Name")
     dept = st.selectbox("Department", ["All", "CSE", "AIML", "DS", "ECE"])
-    year = st.selectbox("Year", ["All", 1, 2, 3, 4])
 
-    base_query = "SELECT * FROM students WHERE status='ACTIVE'"
-    conditions = []
+    query = "SELECT * FROM students WHERE status='ACTIVE'"
     params = []
 
     if keyword.strip():
-        conditions.append("name LIKE ?")
+        query += " AND name LIKE ?"
         params.append(f"%{keyword}%")
 
     if dept != "All":
-        conditions.append("department=?")
+        query += " AND department=?"
         params.append(dept)
 
-    if year != "All":
-        conditions.append("year=?")
-        params.append(year)
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
 
-    if conditions:
-        base_query += " AND " + " AND ".join(conditions)
+    if rows:
+        st.dataframe(dataframe_from_rows(rows), use_container_width=True)
+    else:
+        st.warning("No matching records")
 
-    cursor.execute(base_query, tuple(params))
-    results = cursor.fetchall()
-
-    df = pd.DataFrame(
-        results,
-        columns=["ID", "Name", "Email", "Phone",
-                 "Department", "Year", "Status",
-                 "Created At", "Updated At"]
-    )
-
-    st.dataframe(df, use_container_width=True)
-
-# ---------------------------------------------------------
+# =========================================================
 # UPDATE STUDENT
-# ---------------------------------------------------------
+# =========================================================
 
 elif choice == "Update Student":
-    st.subheader("Update Student")
+    st.subheader("✏️ Update Student")
 
-    students = fetch_students()
-    ids = [s[0] for s in students]
+    rows = get_active_students()
 
-    student_id = st.selectbox("Select Student ID", ids)
+    if not rows:
+        st.info("No students available")
+    else:
+        ids = [r[0] for r in rows]
+        student_id = st.selectbox("Select Student ID", ids)
 
-    cursor.execute("SELECT * FROM students WHERE id=?", (student_id,))
-    student = cursor.fetchone()
+        cursor.execute("SELECT * FROM students WHERE id=?", (student_id,))
+        s = cursor.fetchone()
 
-    name = st.text_input("Name", student[1])
-    email = st.text_input("Email", student[2])
-    phone = st.text_input("Phone", student[3])
-    department = st.selectbox(
-        "Department",
-        ["CSE", "AIML", "DS", "ECE"],
-        index=["CSE", "AIML", "DS", "ECE"].index(student[4])
-    )
-    year = st.selectbox("Year", [1, 2, 3, 4], index=student[5]-1)
+        name = st.text_input("Name", s[1])
+        email = st.text_input("Email", s[2])
+        phone = st.text_input("Phone", s[3])
+        department = st.selectbox(
+            "Department",
+            ["CSE", "AIML", "DS", "ECE"],
+            index=["CSE", "AIML", "DS", "ECE"].index(s[4])
+        )
+        year = st.selectbox("Year", [1, 2, 3, 4], index=s[5] - 1)
 
-    if st.button("Update"):
-        cursor.execute("""
-        UPDATE students SET
-        name=?, email=?, phone=?, department=?, year=?, updated_at=?
-        WHERE id=?
-        """, (
-            name, email, phone, department, year,
-            datetime.now().isoformat(),
-            student_id
-        ))
-        conn.commit()
-        st.success("Student updated successfully")
+        if st.button("Update"):
+            cursor.execute("""
+            UPDATE students SET
+            name=?, email=?, phone=?, department=?, year=?, updated_at=?
+            WHERE id=?
+            """, (name, email, phone, department, year, now(), student_id))
+            conn.commit()
+            st.success("Student updated successfully")
 
-# ---------------------------------------------------------
+# =========================================================
 # DEACTIVATE STUDENT (SOFT DELETE)
-# ---------------------------------------------------------
+# =========================================================
 
 elif choice == "Deactivate Student":
-    st.subheader("Deactivate Student")
+    st.subheader("🚫 Deactivate Student")
 
-    students = fetch_students()
-    ids = [s[0] for s in students]
+    rows = get_active_students()
 
-    student_id = st.selectbox("Select Student ID", ids)
+    if not rows:
+        st.info("No students available")
+    else:
+        ids = [r[0] for r in rows]
+        student_id = st.selectbox("Select Student ID", ids)
 
-    if st.button("Deactivate"):
-        cursor.execute("""
-        UPDATE students SET status='INACTIVE', updated_at=?
-        WHERE id=?
-        """, (datetime.now().isoformat(), student_id))
-        conn.commit()
-        st.warning("Student deactivated (soft delete)")
+        if st.button("Deactivate"):
+            cursor.execute("""
+            UPDATE students SET status='INACTIVE', updated_at=?
+            WHERE id=?
+            """, (now(), student_id))
+            conn.commit()
+            st.warning("Student deactivated")
 
-# ---------------------------------------------------------
-# END OF APPLICATION
-# ---------------------------------------------------------
+# =========================================================
+# END
+# =========================================================
